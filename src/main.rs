@@ -1,7 +1,5 @@
 mod chess;
 use chess::board::Board;
-use chess::piece::ChessPiece;
-use chess::r#move::*;
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -23,15 +21,11 @@ async fn main() -> Result<(), FontError> {
 
     let background_color = Color::from_rgba(96, 96, 96, 255);
 
-    let piece = ChessPiece::Queen;
-    let origin = (0.0, 1.0);
-
-    let moves = ChessPiece::get_legal_moves(&piece, origin);
-
-    for piece_move in moves {
-        println!("Move: ({}, {})", piece_move.0, piece_move.1);
+    if chess_board.move_piece((1, 0), (2, 2)) {
+        println!("can move");
+        chess_board.piece_at((2, 2));
     }
-    
+
 
     loop {
         let screen_width = screen_width();

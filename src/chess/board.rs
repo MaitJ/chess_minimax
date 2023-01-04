@@ -7,6 +7,7 @@ const GRID_SIZE: u8 = 8;
 const CELL_COLORS: (Color, Color) = (Color::new(0.44314, 0.55294, 0.32941, 1.0), 
                                      Color::new(0.92549, 0.92549, 0.83529, 1.0));
 
+#[derive(Debug)]
 enum CellState {
     Empty,
     Piece(ChessPiece)
@@ -154,6 +155,39 @@ impl Board {
         };
         board.add_pieces();
         return board;
+    }
+
+    pub fn piece_at(&self, point: (i8, i8)) {
+        let cell = &self.board[point.0 as usize][point.1 as usize];
+        println!("piece: {:?}", cell.state);
+    }
+
+    //TODO Maybe make this return a Result
+    pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8)) -> bool {
+        let origin_cell: &mut Cell = &mut self.board[origin.1 as usize][origin.0 as usize];
+
+        let side = match origin_cell.side {
+            Some(side) => side,
+            None => return false
+        };
+        
+        match origin_cell.state {
+            CellState::Piece(piece) => {
+                let legal_moves = ChessPiece::get_legal_moves(origin, &piece, &Side::White);
+                println!("legal_moves: {:?}", legal_moves);
+                if legal_moves.contains(&to) {
+                    origin_cell.state = CellState::Empty;
+                    origin_cell.side = None;
+
+                    //TODO Add text_spacing
+                    self.board[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
+                    self.board[to.1 as usize][to.0 as usize].side = Some(side);
+                    return true;
+                }
+                false
+            },
+            CellState::Empty => false
+        }
     }
 
     pub fn rescale(&mut self, screen_width: f32, screen_height: f32) {
