@@ -1,5 +1,7 @@
-use crate::chess::piece::{ChessPiece, Side};
+use std::{rc::Rc, borrow::BorrowMut};
+
 use macroquad::prelude::*;
+use crate::chess::piece::{ChessPiece, Side};
 
 pub const CELL_SIZE: f32 = 80.0;
 const GRID_SIZE: u8 = 8;
@@ -40,21 +42,24 @@ impl Rectangle {
     }
 }
 
+pub struct CellPiece<'a> {
+    pub cell: &'a Cell,
+    pub position: (i8, i8)
+}
+
 pub struct Cell {
     state: CellState,
     side: Option<Side>,
 
     position: (f32, f32),
     color: &'static Color,
-    text_offset: f32
 }
 
 impl Cell {
-    fn new(position: (f32, f32), color: &'static Color, text_offset: f32) -> Cell {
+    fn new(position: (f32, f32), color: &'static Color) -> Cell {
         Cell {
             position,
             color,
-            text_offset,
 
             state: CellState::Empty,
             side: None
@@ -65,11 +70,37 @@ impl Cell {
         Rectangle::new(self.position.0, self.position.1,
                        br.0, br.1)
     }
+
+    pub fn modify_cell(&mut self, state: CellState, side: Option<Side>) {
+        self.state = state;
+        self.side = side;
+    }
+
+    pub fn is_occupied(&self) -> bool {
+        match self.state {
+            CellState::Piece(_) => true,
+            CellState::Empty => false
+        }
+    }
+
+    pub fn get_piece_side(&self) -> Option<(ChessPiece, Side)> {
+        match self.state {
+            CellState::Piece(piece) => {
+                match self.side {
+                    Some(side) => Some((piece, side)),
+                    None => None
+                }
+            },
+            CellState::Empty => None
+        }
+    }
 }
 
 pub struct Board {
-    board: Vec<Vec<Cell>>,
-    text_params: TextParams
+    board: Rc<Vec<Vec<Cell>>>,
+    //TODO Should probably move to BoardView
+    pub text_params: TextParams,
+    pub text_spacing: f32
 }
 
 
@@ -94,21 +125,21 @@ impl Board {
             (Side::White, 7)
         ];
 
+        let board_ref = Rc::get_mut(&mut self.board).expect("Couldn't borrow board as mutable");
+
         for (side, row_i) in main_rows {
-            let row = &mut self.board[row_i];
-            for (i, cell) in row.into_iter().enumerate() {
+            let row = &mut board_ref[row_i];
+            for (i, cell) in row.iter_mut().enumerate() {
                 cell.state = CellState::Piece(main_pieces_order[i].clone());
                 cell.side = Some(side.clone());
-                cell.text_offset = ChessPiece::get_center_offset(&main_pieces_order[i], &self.text_params);
             }
         }
 
         for (side, row_i) in pawn_rows {
-            let row = &mut self.board[row_i];
+            let row = &mut board_ref[row_i];
             for cell in row {
                 cell.state = CellState::Piece(ChessPiece::Pawn);
                 cell.side = Some(side.clone());
-                cell.text_offset = ChessPiece::get_center_offset(&ChessPiece::Pawn, &self.text_params);
             }
         }
     }
@@ -128,7 +159,9 @@ impl Board {
         //TOOD Error handle this better
         let text_params = Self::init_text_params().await.expect("Failed to open font");
 
-        let mut board: Vec<Vec<Cell>> = vec![];
+        let mut board: Rc<Vec<Vec<Cell>>> = Rc::new(vec![]);
+        //TODO Definately have to replace get_mut
+        let mut_board = Rc::get_mut(&mut board).expect("Couldn't get board as mutable");
         let start_x = (screen_width - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
         let start_y = (screen_height - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
 
@@ -139,19 +172,20 @@ impl Board {
             for j in 0..GRID_SIZE {
                 let cur_x = start_x + (j as f32 * CELL_SIZE);
                 if !color_switch {
-                    row.push(Cell::new((cur_x, cur_y), &CELL_COLORS.0, 0.0));
+                    row.push(Cell::new((cur_x, cur_y), &CELL_COLORS.0));
                 } else {
-                    row.push(Cell::new((cur_x, cur_y), &CELL_COLORS.1, 0.0));
+                    row.push(Cell::new((cur_x, cur_y), &CELL_COLORS.1));
                 }
                 color_switch = !color_switch;
             }
             color_switch = !color_switch;
-            board.push(row);
+            mut_board.push(row);
         }
 
         let mut board = Board {
             board,
-            text_params
+            text_params,
+            text_spacing: ChessPiece::get_center_offset(&ChessPiece::Pawn, &text_params)
         };
         board.add_pieces();
         return board;
@@ -161,10 +195,31 @@ impl Board {
         let cell = &self.board[point.0 as usize][point.1 as usize];
         println!("piece: {:?}", cell.state);
     }
+    
+
+    pub fn get_board_state(&self) -> Rc<Vec<Vec<Cell>>> {
+        unimplemented!();
+    }
+
+    pub fn get_board_state_bitfield(&self) -> Vec<Vec<bool>> {
+        let mut bitfield: Vec<Vec<bool>> = vec![];
+        for row in self.board.iter() {
+            let mut bitfield_row: Vec<bool> = vec![];
+            for cell in row {
+                match cell.state {
+                    CellState::Empty => bitfield_row.push(false),
+                    CellState::Piece(_) => bitfield_row.push(true)
+                }
+            }
+            bitfield.push(bitfield_row);
+        }
+        return bitfield;
+    }
 
     //TODO Maybe make this return a Result
     pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8)) -> bool {
-        let origin_cell: &mut Cell = &mut self.board[origin.1 as usize][origin.0 as usize];
+        let board_ref = &mut self.board;
+        let origin_cell: &mut Cell = &mut board_ref[origin.1 as usize][origin.0 as usize];
 
         let side = match origin_cell.side {
             Some(side) => side,
@@ -173,15 +228,16 @@ impl Board {
         
         match origin_cell.state {
             CellState::Piece(piece) => {
-                let legal_moves = ChessPiece::get_legal_moves(origin, &piece, &Side::White);
-                println!("legal_moves: {:?}", legal_moves);
-                if legal_moves.contains(&to) {
+                let pseudolegal_moves = ChessPiece::get_pseudolegal_moves(Rc::clone(board_ref), origin, &piece, &Side::White);
+                println!("legal_moves: {:?}", pseudolegal_moves);
+                if pseudolegal_moves.contains(&to) {
+                    origin_cell.modify_cell(CellState::Empty, None);
                     origin_cell.state = CellState::Empty;
                     origin_cell.side = None;
 
                     //TODO Add text_spacing
-                    self.board[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
-                    self.board[to.1 as usize][to.0 as usize].side = Some(side);
+                    board_ref[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
+                    board_ref[to.1 as usize][to.0 as usize].side = Some(side);
                     return true;
                 }
                 false
@@ -194,7 +250,8 @@ impl Board {
         let start_x = (screen_width - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
         let start_y = (screen_height - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
 
-        for (i, row) in &mut self.board.iter_mut().enumerate() {
+        let board_ref = Rc::get_mut(&mut self.board).expect("Couldn't borrow board as mutable");
+        for (i, row) in board_ref.iter_mut().enumerate() {
             let cur_y = start_y + (i as f32 * CELL_SIZE);
             for (j, cell) in row.iter_mut().enumerate() {
                 let cur_x = start_x + (j as f32 * CELL_SIZE);
@@ -209,23 +266,39 @@ impl Board {
         if let CellState::Piece(piece) = cell.state {
             if let Some(side) = cell.side {
                 let piece_str = ChessPiece::get_char(&piece, &side).to_string();
-                draw_text_ex(&piece_str, cell.position.0 + cell.text_offset, cell.position.1 + CELL_SIZE, self.text_params);
+                draw_text_ex(&piece_str, cell.position.0 + self.text_spacing, cell.position.1 + CELL_SIZE, self.text_params);
             }
         }
     }
 
-    fn check_player_input(cell: &Cell) {
-        if cell.get_rectangle().contains_point(mouse_position()) {
+    pub fn check_player_input<'a>(&'a self) -> Option<CellPiece> {
+        let board_state = &self.board;
+
+        for i in 0..8 {
+            for j in 0..8 {
+                let cell = &board_state[j as usize][i as usize];
+                if cell.get_rectangle().contains_point(mouse_position()) && 
+                    is_mouse_button_pressed(MouseButton::Left) {
+                    return Some(CellPiece {
+                        cell,
+                        position: (j, i)
+                    });
+                }
+            }
         }
+
+        None
+    }
+
+    pub fn highlight_cell(&self, position: (i8, i8), color: Color) {
+        unimplemented!();
     }
 
     pub fn draw(&self) {
-        for row in &self.board {
+        for row in self.board.iter() {
             for cell in row {
-                Self::check_player_input(&cell);
                 self.draw_cell(cell);
             }
         }
     }
-
 }
