@@ -4,10 +4,10 @@ use super::board::Cell;
 use super::r#move::{MovePattern, is_in_square_from_origin, is_in_l_from_origin, NUM_OF_SQUARES_TO_EDGE, tuple_to_square_index, RAY_INCREMENTS};
 use super::r#move::{MovePattern::N, MovePattern::NW, MovePattern::W, MovePattern::SW, MovePattern::S, MovePattern::SE, MovePattern::E, MovePattern::NE};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Side {
-    White,
-    Black
+    White = 1,
+    Black = -1
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -19,6 +19,8 @@ pub enum ChessPiece {
     Knight = 4,
     Rook = 5
 }
+
+const PIECE_SCORES: [i32; 6] = [1000, 500, 250, 50, 250, 400];
 
 impl ChessPiece {
     pub fn get_char(piece: &ChessPiece, side: &Side) -> char {
@@ -50,13 +52,17 @@ impl ChessPiece {
             ChessPiece::Pawn => '\u{265F}'
         }
     }
+
+    pub fn get_material_price(piece: &ChessPiece) -> i32 {
+        return PIECE_SCORES[*piece as usize];
+    }
     pub fn get_center_offset(piece: &ChessPiece, text_params: &TextParams) -> f32 {
         let piece_str = ChessPiece::get_char(piece, &Side::White).to_string();
         let text_dimensions = measure_text(&piece_str, Some(text_params.font), text_params.font_size, text_params.font_scale);
         return (CELL_SIZE - text_dimensions.width) / 2.0;
     }
 
-    fn generate_allowed_moves(origin: (i8, i8), patterns: Vec<MovePattern>, board: &Vec<Vec<Cell>>) -> Vec<(i8, i8)> {
+    fn generate_allowed_moves(origin: (i8, i8), patterns: Vec<MovePattern>, board: &Vec<Vec<Cell>>, whose_turn: Side) -> Vec<(i8, i8)> {
         let mut moves: Vec<(i8, i8)> = vec![];
         for pattern in patterns {
             let square_index = tuple_to_square_index(origin);
@@ -67,56 +73,65 @@ impl ChessPiece {
                 let dir_vec = (direction_increment.0 * (square + 1), direction_increment.1 * (square + 1));
                 let to_square = (origin.0 + dir_vec.0, origin.1 + dir_vec.1);
 
-                if board[to_square.1 as usize][to_square.0 as usize].is_occupied() { break; }
+                let to_cell = &board[to_square.1 as usize][to_square.0 as usize];
+                if to_cell.contains_opponents_piece(whose_turn) {moves.push(to_square);}
+                if to_cell.is_occupied() {break;}
                 moves.push(to_square);
             }
         }
         return moves;
     }
 
-    fn generate_king_moves(origin: (i8, i8), board: &Vec<Vec<Cell>>) -> Vec<(i8, i8)> {
+    fn generate_king_moves(origin: (i8, i8), board: &Vec<Vec<Cell>>, whose_turn: Side) -> Vec<(i8, i8)> {
         let mut moves: Vec<(i8, i8)> = vec![];
         for i in 0..8 {
             for j in 0..8 {
                 let to = (i, j);
                 let cell = &board[j as usize][i as usize];
-                if !cell.is_occupied() && is_in_square_from_origin(origin, to) {moves.push((i, j));}
+                if is_in_square_from_origin(origin, to) && (!cell.is_occupied() || cell.contains_opponents_piece(whose_turn)){moves.push((i, j));}
             }
         }
         return moves;
     }
 
-    fn generate_knight_moves(origin: (i8, i8), board: &Vec<Vec<Cell>>) -> Vec<(i8, i8)> {
+    fn generate_knight_moves(origin: (i8, i8), board: &Vec<Vec<Cell>>, whose_turn: Side) -> Vec<(i8, i8)> {
         let mut moves: Vec<(i8, i8)> = vec![];
         for i in 0..8 {
             for j in 0..8 {
                 let to = (i, j);
                 let cell = &board[j as usize][i as usize];
-                if !cell.is_occupied() && is_in_l_from_origin(origin, to) {moves.push((i, j));}
+
+                //if !is_in_l_from_origin(origin, to) || cell.is_occupied() {break;}
+                if is_in_l_from_origin(origin, to) && (!cell.is_occupied() || cell.contains_opponents_piece(whose_turn)){moves.push((i, j));}
             }
         }
         return moves;
     }
 
-    fn generate_pawn_moves(origin: (i8, i8), side: &Side, board: &Vec<Vec<Cell>>) -> Vec<(i8, i8)> {
+    fn generate_pawn_moves(origin: (i8, i8), whose_turn: Side, board: &Vec<Vec<Cell>>) -> Vec<(i8, i8)> {
         let mut moves: Vec<(i8, i8)> = vec![];
 
         let (x, y) = origin;
-        match side {
-            Side::White => if !board[(y - 1) as usize][x as usize].is_occupied() { moves.push((x, y - 1)); },
-            Side::Black => if !board[(y + 1) as usize][x as usize].is_occupied() { moves.push((x, y + 1)); }
+        let (to_x, to_y) = match whose_turn {
+            Side::White => (x, y - 1),
+            Side::Black => (x, y + 1)
         };
+
+        let to_cell = &board[to_y as usize][to_x as usize];
+        if to_cell.is_occupied() && !to_cell.contains_opponents_piece(whose_turn) {return moves;}
+        //if to_cell.is_occupied() {return moves;}
+        moves.push((to_x, to_y));
         moves
     }
 
-    pub fn get_pseudolegal_moves(board: &Vec<Vec<Cell>>, origin: (i8, i8), piece: &ChessPiece, side: &Side) -> Vec<(i8, i8)> {
+    pub fn get_pseudolegal_moves(board: &Vec<Vec<Cell>>, origin: (i8, i8), piece: &ChessPiece, whose_turn: &Side) -> Vec<(i8, i8)> {
         let moves = match piece {
-            ChessPiece::King => Self::generate_king_moves(origin, board),
-            ChessPiece::Queen => Self::generate_allowed_moves(origin, vec![N, NE, E, SE, S, SW, W, NW], board),
-            ChessPiece::Bishop => Self::generate_allowed_moves(origin, vec![NW, NE, SW, SE], board),
-            ChessPiece::Rook => Self::generate_allowed_moves(origin, vec![N, E, W, S], board),
-            ChessPiece::Knight => Self::generate_knight_moves(origin, board),
-            ChessPiece::Pawn => Self::generate_pawn_moves(origin, side, board)
+            ChessPiece::King => Self::generate_king_moves(origin, board, *whose_turn),
+            ChessPiece::Queen => Self::generate_allowed_moves(origin, vec![N, NE, E, SE, S, SW, W, NW], board, *whose_turn),
+            ChessPiece::Bishop => Self::generate_allowed_moves(origin, vec![NW, NE, SW, SE], board, *whose_turn),
+            ChessPiece::Rook => Self::generate_allowed_moves(origin, vec![N, E, W, S], board, *whose_turn),
+            ChessPiece::Knight => Self::generate_knight_moves(origin, board, *whose_turn),
+            ChessPiece::Pawn => Self::generate_pawn_moves(origin, *whose_turn, board)
         };
         return moves;
     }

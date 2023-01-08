@@ -1,6 +1,7 @@
 mod chess;
 use chess::board::Board;
 use chess::board_view::BoardView;
+use chess::piece::Side;
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -10,6 +11,13 @@ fn window_conf() -> Conf {
         window_width: 800,
         window_height: 600,
         ..Default::default()
+    }
+}
+
+fn swap_turn(whose_turn: Side) -> Side {
+    match whose_turn {
+        Side::White => Side::Black,
+        Side::Black => Side::White
     }
 }
 
@@ -23,14 +31,12 @@ async fn main() -> Result<(), FontError> {
 
     let background_color = Color::from_rgba(96, 96, 96, 255);
 
-    if chess_board.move_piece((1, 0), (2, 2)) {
-        println!("can move");
-        chess_board.piece_at((2, 2));
-    }
+    let player_side = Side::White;
+    //-1 or 1
+    let mut whose_turn: Side = Side::White;
 
-    chess_board.move_piece((3, 6), (3, 5));
-    chess_board.move_piece((4, 7), (0, 3));
-
+    let pieces = chess_board.get_sides_boardpieces(Side::White);
+    pieces.into_iter().for_each(|piece| println!("white_piece: {:?}", piece));
 
     loop {
         let screen_width = screen_width();
@@ -45,13 +51,22 @@ async fn main() -> Result<(), FontError> {
         chess_board.draw();
 
         if is_mouse_button_pressed(MouseButton::Left) {
-            let piece_pickup = BoardView::was_piece_hit(chess_board.get_board_state());
+            let piece_pickup = BoardView::was_piece_hit(chess_board.get_board_state(), &whose_turn);
             if let Some(piece_pickup) = piece_pickup {
                 board_view.pick_up_piece(piece_pickup);
             }
         }
 
-        board_view.player_input(&mut chess_board);
+        if board_view.player_input(&mut chess_board) {
+            whose_turn = swap_turn(whose_turn);
+            println!("whose_turn: {:?}", whose_turn);
+        }
+
+
+        //if opponents_turn {
+        //  opponent.turn(board);
+        //}
+        //swap_turn
         next_frame().await
     }
 }

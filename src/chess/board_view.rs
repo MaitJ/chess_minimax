@@ -28,7 +28,6 @@ impl BoardView {
         }
     }
     pub fn pick_up_piece(&mut self, piece_pickup: PiecePickup) {
-        println!("Picked up piece: {:?}, last_pos: ({}, {})", piece_pickup.piece, piece_pickup.last_pos.1, piece_pickup.last_pos.0);
         self.picked_up_piece = Some(piece_pickup);
     }
 
@@ -46,17 +45,24 @@ impl BoardView {
             cell.highlight_cell(LEGAL_MOVE_CELL_COLOR);
         }
     }
+
+    pub fn is_allowed_pickup(piece_side: (ChessPiece, Side), cell_piece: CellPiece, whose_turn: Side) -> Option<PiecePickup> {
+        if piece_side.1 == whose_turn {
+            let piece_pickup: PiecePickup = PiecePickup {
+                last_pos: cell_piece.position,
+                piece: piece_side.0,
+                side: piece_side.1
+            };
+            return Some(piece_pickup);
+        }
+        None
+    }
     
-    pub fn was_piece_hit(board: &Vec<Vec<board::Cell>>) -> Option<PiecePickup> {
+    pub fn was_piece_hit(board: &Vec<Vec<board::Cell>>, whose_turn: &Side) -> Option<PiecePickup> {
         let cell_piece = BoardView::check_player_input(board);
         if let Some(cell_piece) = cell_piece {
             if let Some(piece_side) = cell_piece.cell.get_piece_side() {
-                let piece_pickup: PiecePickup = PiecePickup {
-                    last_pos: cell_piece.position,
-                    piece: piece_side.0,
-                    side: piece_side.1
-                };
-                return Some(piece_pickup);
+                return Self::is_allowed_pickup(piece_side, cell_piece, *whose_turn);
             }
         }
         None
@@ -66,20 +72,25 @@ impl BoardView {
         self.picked_up_piece = None;
     }
 
-    pub fn check_for_new_position(&mut self, board: &mut Board, piece_pickup: PiecePickup) {
+    pub fn check_for_new_position(&mut self, board: &mut Board, piece_pickup: PiecePickup) -> bool {
         if is_mouse_button_released(MouseButton::Left) {
             let board_state = board.get_board_state();
             let cell_piece = Self::check_player_input(board_state);
             match cell_piece {
                 Some(piece) => {
-                    println!("New pos: ({}, {})", piece.position.1, piece.position.0);
-                    if board.move_piece(piece_pickup.last_pos, piece.position) {
+                    println!("last_pos: ({}, {}), new_pos: ({}, {})", piece_pickup.last_pos.0, piece_pickup.last_pos.1, piece.position.0, piece.position.1);
+                    if board.move_piece(piece_pickup.last_pos, piece.position, piece_pickup.side) {
                         self.drop_piece();
+                        return true;
+                    } else {
+                        self.drop_piece();
+                        return false;
                     }
                 },
-                None => ()
-            };
+                None => return false,
+            }
         }
+        false
     }
 
     pub fn check_player_input(board_state: &Vec<Vec<board::Cell>>) -> Option<CellPiece> {
@@ -98,17 +109,16 @@ impl BoardView {
         None
     }
 
-    pub fn player_input(&mut self, board: &mut Board) {
+    pub fn player_input(&mut self, board: &mut Board) -> bool {
         match &self.picked_up_piece {
             Some(piece_pickup) => {
                 let board_state = board.get_board_state();
                 let legal_moves = ChessPiece::get_pseudolegal_moves(board_state, piece_pickup.last_pos, &piece_pickup.piece, &piece_pickup.side);
                 self.render_picked_up_piece(&piece_pickup);
                 Self::highlight_legal_moves(&legal_moves, board_state);
-
-                self.check_for_new_position(board, piece_pickup.clone());
+                return self.check_for_new_position(board, piece_pickup.clone());
             },
-            None => ()
+            None => return false
         }
     }
 }

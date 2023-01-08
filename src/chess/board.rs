@@ -11,7 +11,7 @@ const CELL_COLORS: (Color, Color) = (Color::new(0.44314, 0.55294, 0.32941, 1.0),
 
 
 #[derive(Debug)]
-enum CellState {
+pub enum CellState {
     Empty,
     Piece(ChessPiece)
 }
@@ -81,6 +81,31 @@ impl Cell {
         draw_rectangle(self.position.0, self.position.1, CELL_SIZE, CELL_SIZE, color);
     }
 
+    pub fn contains_opponents_piece(&self, whose_turn: Side) -> bool {
+        if let Some(side) = self.side {
+            if side != whose_turn {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn has_piece_and_side_matches(&self, side: Side) -> bool {
+        if let CellState::Piece(piece) = self.state {
+            if let Some(self_side) = self.side {
+                return Self::sides_match(self_side, side);
+            }
+        }
+        false
+    }
+
+    fn sides_match(self_side: Side, side: Side) -> bool {
+        if self_side != side {
+            return false;
+        }
+        true
+    }
+
     pub fn is_occupied(&self) -> bool {
         match self.state {
             CellState::Piece(_) => true,
@@ -99,6 +124,19 @@ impl Cell {
             CellState::Empty => None
         }
     }
+}
+
+#[derive(Debug)]
+pub struct BoardPiece {
+    piece: ChessPiece,
+    location: (i8, i8)
+}
+
+#[derive(Debug)]
+struct BoardEvaluationInfo {
+    pieces: Vec<ChessPiece>,
+    white_pieces: u8,
+    black_pieces: u8
 }
 
 pub struct Board {
@@ -159,6 +197,73 @@ impl Board {
         Ok(text_params)
     }
 
+    fn get_board_evaluation_info(board: &Vec<Vec<Cell>>) -> BoardEvaluationInfo {
+        let mut pieces: Vec<ChessPiece> = vec![];
+        let mut white_pieces: u8 = 0;
+        let mut black_pieces: u8 = 0;
+        
+        for cell in board.iter().flatten() {
+            if let CellState::Piece(piece) = cell.state {
+                pieces.push(piece);
+            }
+
+            if let Some(side) = cell.side {
+                match side {
+                    Side::White => white_pieces += 1,
+                    Side::Black => black_pieces += 1
+                }
+            }
+        }
+
+        BoardEvaluationInfo {
+            pieces,
+            black_pieces,
+            white_pieces
+        }
+    }
+
+    pub fn evaluate_material_weight(pieces: Vec<ChessPiece>) -> i32 {
+        let mut score: i32 = 0;
+        pieces.iter()
+            .for_each(|piece| score += ChessPiece::get_material_price(piece));
+        return score;
+    }
+    
+    fn iterate_board<T>(&self, mut closure: T) where T : FnMut(i8, i8) -> () {
+        for i in 0..8 {
+            for j in 0..8 {
+                (closure)(i, j);
+            }
+        }
+    }
+
+    //TODO Test
+    pub fn get_sides_boardpieces(&self, side: Side) -> Vec<BoardPiece> {
+        let mut pieces: Vec<BoardPiece> = vec![];
+
+        self.iterate_board(|i, j| {
+            let cell = &self.board[i as usize][j as usize];
+            if cell.has_piece_and_side_matches(side) {
+                match cell.state {
+                    CellState::Piece(piece) => pieces.push(BoardPiece {piece, location: (i, j)}),
+                    CellState::Empty => ()
+                };
+            }
+        });
+        pieces
+    }
+
+    pub fn get_all_moves_for_side(&self) -> Vec<(i8, i8)> {
+        unimplemented!();
+    }
+
+    pub fn evaluate_board_score(board: &Vec<Vec<Cell>>, whose_turn: Side) -> i32 {
+        let board_eval_info = Self::get_board_evaluation_info(board);
+        let material_weight = Self::evaluate_material_weight(board_eval_info.pieces);
+        let score = material_weight * (board_eval_info.white_pieces as i32 - board_eval_info.black_pieces as i32) * whose_turn as i32;
+        return score;
+    }
+
     pub async fn new(screen_width: f32, screen_height: f32) -> Board {
         //TOOD Error handle this better
         let text_params = Self::init_text_params().await.expect("Failed to open font");
@@ -204,7 +309,7 @@ impl Board {
         &self.board
     }
 
-    pub fn get_board_state_bitfield(&self) -> Vec<Vec<bool>> {
+    pub fn get_occupied_slots(&self) -> Vec<Vec<bool>> {
         let mut bitfield: Vec<Vec<bool>> = vec![];
         for row in self.board.iter() {
             let mut bitfield_row: Vec<bool> = vec![];
@@ -220,7 +325,7 @@ impl Board {
     }
 
     //TODO Maybe make this return a Result
-    pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8)) -> bool {
+    pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8), whose_turn: Side) -> bool {
         let origin_cell: &Cell = &self.board[origin.1 as usize][origin.0 as usize];
 
         let side = match origin_cell.side {
@@ -229,7 +334,8 @@ impl Board {
         };
 
         if let CellState::Piece(piece) = origin_cell.state {
-            let pseudolegal_moves = ChessPiece::get_pseudolegal_moves(&self.board, origin, &piece, &Side::White);
+            let pseudolegal_moves = ChessPiece::get_pseudolegal_moves(&self.board, origin, &piece, &whose_turn);
+            println!("legal_moves: {:?}", pseudolegal_moves);
             if pseudolegal_moves.contains(&to) {
                 let origin_cell_mut = &mut self.board[origin.1 as usize][origin.0 as usize];
                 origin_cell_mut.modify_cell(CellState::Empty, None);
