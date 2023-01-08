@@ -1,6 +1,6 @@
 use std::cmp::min;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum MovePattern {
     N = 0,
     NE = 1,
@@ -36,10 +36,10 @@ const fn compute_nr_of_squares_to_edge() -> [[i8; 64]; 8] {
 
     while i < 8 {
         while j < 8 {
-            let n = j;
-            let e = 7 - i;
-            let s = 7 - j;
-            let w = i;
+            let n = i;
+            let e = 7 - j;
+            let s = 7 - i;
+            let w = j;
 
             squares_to_edge[MovePattern::N as usize][tuple_to_square_index((j, i)) as usize] = n;
             squares_to_edge[MovePattern::E as usize][tuple_to_square_index((j, i)) as usize] = e;
@@ -53,6 +53,7 @@ const fn compute_nr_of_squares_to_edge() -> [[i8; 64]; 8] {
             j += 1;
         }
         i += 1;
+        j = 0;
     }
     return squares_to_edge;
 }
@@ -62,17 +63,6 @@ fn find_origin_to_delta(origin: (i8, i8), to: (i8, i8)) -> (i8, i8) {
     let dx = (to.0 - origin.0).abs();
     let dy = (to.1 - origin.1).abs();
     (dx, dy)
-}
-
-pub fn is_allowed_move(origin: (i8, i8), to: (i8, i8), pattern: &MovePattern) -> bool {
-    let (dx, dy) = find_origin_to_delta(origin, to);
-    match pattern {
-        _ => false
-    }
-}
-
-fn is_origin(dx: i8, dy: i8) -> bool {
-    dx == 0 && dy == 0
 }
 
 pub fn is_in_l_from_origin(origin: (i8, i8), to: (i8, i8)) -> bool {

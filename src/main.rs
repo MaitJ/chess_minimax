@@ -1,6 +1,6 @@
 mod chess;
 use chess::board::Board;
-use chess::board_view::{BoardView, PiecePickup};
+use chess::board_view::BoardView;
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -30,7 +30,6 @@ async fn main() -> Result<(), FontError> {
 
     chess_board.move_piece((3, 6), (3, 5));
     chess_board.move_piece((4, 7), (0, 3));
-    println!("{:?}", chess_board.get_board_state_bitfield());
 
 
     loop {
@@ -45,11 +44,11 @@ async fn main() -> Result<(), FontError> {
 
         chess_board.draw();
 
-        let cell_piece = chess_board.check_player_input();
-        let piece_pickup = BoardView::was_piece_hit(cell_piece);
-
-        if let Some(piece_pickup) = piece_pickup {
-            board_view.pick_up_piece(piece_pickup);
+        if is_mouse_button_pressed(MouseButton::Left) {
+            let piece_pickup = BoardView::was_piece_hit(chess_board.get_board_state());
+            if let Some(piece_pickup) = piece_pickup {
+                board_view.pick_up_piece(piece_pickup);
+            }
         }
 
         board_view.player_input(&mut chess_board);

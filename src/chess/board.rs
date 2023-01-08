@@ -9,6 +9,7 @@ const GRID_SIZE: u8 = 8;
 const CELL_COLORS: (Color, Color) = (Color::new(0.44314, 0.55294, 0.32941, 1.0), 
                                      Color::new(0.92549, 0.92549, 0.83529, 1.0));
 
+
 #[derive(Debug)]
 enum CellState {
     Empty,
@@ -16,7 +17,7 @@ enum CellState {
 }
 
 #[derive(Debug)]
-struct Rectangle {
+pub struct Rectangle {
     min_x: f32,
     min_y: f32,
     max_x: f32,
@@ -33,7 +34,7 @@ impl Rectangle {
         }
     }
 
-    fn contains_point(&self, point: (f32, f32)) -> bool {
+    pub fn contains_point(&self, point: (f32, f32)) -> bool {
         if (point.0 >= self.min_x && point.0 <= self.max_x) &&
            (point.1 >= self.min_y && point.1 <= self.max_y) {
                return true;
@@ -65,7 +66,7 @@ impl Cell {
             side: None
         }
     }
-    fn get_rectangle(&self) -> Rectangle {
+    pub fn get_rectangle(&self) -> Rectangle {
         let br: (f32, f32) = (self.position.0 + CELL_SIZE, self.position.1 + CELL_SIZE);
         Rectangle::new(self.position.0, self.position.1,
                        br.0, br.1)
@@ -74,6 +75,10 @@ impl Cell {
     pub fn modify_cell(&mut self, state: CellState, side: Option<Side>) {
         self.state = state;
         self.side = side;
+    }
+
+    pub fn highlight_cell(&self, color: Color) {
+        draw_rectangle(self.position.0, self.position.1, CELL_SIZE, CELL_SIZE, color);
     }
 
     pub fn is_occupied(&self) -> bool {
@@ -97,7 +102,7 @@ impl Cell {
 }
 
 pub struct Board {
-    board: Rc<Vec<Vec<Cell>>>,
+    board: Vec<Vec<Cell>>,
     //TODO Should probably move to BoardView
     pub text_params: TextParams,
     pub text_spacing: f32
@@ -125,10 +130,9 @@ impl Board {
             (Side::White, 7)
         ];
 
-        let board_ref = Rc::get_mut(&mut self.board).expect("Couldn't borrow board as mutable");
 
         for (side, row_i) in main_rows {
-            let row = &mut board_ref[row_i];
+            let row = &mut self.board[row_i];
             for (i, cell) in row.iter_mut().enumerate() {
                 cell.state = CellState::Piece(main_pieces_order[i].clone());
                 cell.side = Some(side.clone());
@@ -136,7 +140,7 @@ impl Board {
         }
 
         for (side, row_i) in pawn_rows {
-            let row = &mut board_ref[row_i];
+            let row = &mut self.board[row_i];
             for cell in row {
                 cell.state = CellState::Piece(ChessPiece::Pawn);
                 cell.side = Some(side.clone());
@@ -159,9 +163,8 @@ impl Board {
         //TOOD Error handle this better
         let text_params = Self::init_text_params().await.expect("Failed to open font");
 
-        let mut board: Rc<Vec<Vec<Cell>>> = Rc::new(vec![]);
+        let mut board: Vec<Vec<Cell>> = vec![];
         //TODO Definately have to replace get_mut
-        let mut_board = Rc::get_mut(&mut board).expect("Couldn't get board as mutable");
         let start_x = (screen_width - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
         let start_y = (screen_height - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
 
@@ -179,7 +182,7 @@ impl Board {
                 color_switch = !color_switch;
             }
             color_switch = !color_switch;
-            mut_board.push(row);
+            board.push(row);
         }
 
         let mut board = Board {
@@ -197,8 +200,8 @@ impl Board {
     }
     
 
-    pub fn get_board_state(&self) -> Rc<Vec<Vec<Cell>>> {
-        unimplemented!();
+    pub fn get_board_state(&self) -> &Vec<Vec<Cell>> {
+        &self.board
     }
 
     pub fn get_board_state_bitfield(&self) -> Vec<Vec<bool>> {
@@ -218,40 +221,33 @@ impl Board {
 
     //TODO Maybe make this return a Result
     pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8)) -> bool {
-        let board_ref = &mut self.board;
-        let origin_cell: &mut Cell = &mut board_ref[origin.1 as usize][origin.0 as usize];
+        let origin_cell: &Cell = &self.board[origin.1 as usize][origin.0 as usize];
 
         let side = match origin_cell.side {
             Some(side) => side,
             None => return false
         };
-        
-        match origin_cell.state {
-            CellState::Piece(piece) => {
-                let pseudolegal_moves = ChessPiece::get_pseudolegal_moves(Rc::clone(board_ref), origin, &piece, &Side::White);
-                println!("legal_moves: {:?}", pseudolegal_moves);
-                if pseudolegal_moves.contains(&to) {
-                    origin_cell.modify_cell(CellState::Empty, None);
-                    origin_cell.state = CellState::Empty;
-                    origin_cell.side = None;
 
-                    //TODO Add text_spacing
-                    board_ref[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
-                    board_ref[to.1 as usize][to.0 as usize].side = Some(side);
-                    return true;
-                }
-                false
-            },
-            CellState::Empty => false
+        if let CellState::Piece(piece) = origin_cell.state {
+            let pseudolegal_moves = ChessPiece::get_pseudolegal_moves(&self.board, origin, &piece, &Side::White);
+            if pseudolegal_moves.contains(&to) {
+                let origin_cell_mut = &mut self.board[origin.1 as usize][origin.0 as usize];
+                origin_cell_mut.modify_cell(CellState::Empty, None);
+
+                //TODO Add text_spacing
+                self.board[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
+                self.board[to.1 as usize][to.0 as usize].side = Some(side);
+                return true;
+            }
         }
+        false
     }
 
     pub fn rescale(&mut self, screen_width: f32, screen_height: f32) {
         let start_x = (screen_width - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
         let start_y = (screen_height - GRID_SIZE as f32 * CELL_SIZE) / 2.0;
 
-        let board_ref = Rc::get_mut(&mut self.board).expect("Couldn't borrow board as mutable");
-        for (i, row) in board_ref.iter_mut().enumerate() {
+        for (i, row) in self.board.iter_mut().enumerate() {
             let cur_y = start_y + (i as f32 * CELL_SIZE);
             for (j, cell) in row.iter_mut().enumerate() {
                 let cur_x = start_x + (j as f32 * CELL_SIZE);
@@ -271,28 +267,6 @@ impl Board {
         }
     }
 
-    pub fn check_player_input<'a>(&'a self) -> Option<CellPiece> {
-        let board_state = &self.board;
-
-        for i in 0..8 {
-            for j in 0..8 {
-                let cell = &board_state[j as usize][i as usize];
-                if cell.get_rectangle().contains_point(mouse_position()) && 
-                    is_mouse_button_pressed(MouseButton::Left) {
-                    return Some(CellPiece {
-                        cell,
-                        position: (j, i)
-                    });
-                }
-            }
-        }
-
-        None
-    }
-
-    pub fn highlight_cell(&self, position: (i8, i8), color: Color) {
-        unimplemented!();
-    }
 
     pub fn draw(&self) {
         for row in self.board.iter() {
