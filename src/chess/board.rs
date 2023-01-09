@@ -10,7 +10,7 @@ const CELL_COLORS: (Color, Color) = (Color::new(0.44314, 0.55294, 0.32941, 1.0),
                                      Color::new(0.92549, 0.92549, 0.83529, 1.0));
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CellState {
     Empty,
     Piece(ChessPiece)
@@ -22,6 +22,12 @@ pub struct Rectangle {
     min_y: f32,
     max_x: f32,
     max_y: f32
+}
+
+#[derive(Debug, Clone)]
+pub struct Move {
+    pub from: (i8, i8),
+    pub to: (i8, i8),
 }
 
 impl Rectangle {
@@ -48,6 +54,7 @@ pub struct CellPiece<'a> {
     pub position: (i8, i8)
 }
 
+#[derive(Clone)]
 pub struct Cell {
     state: CellState,
     side: Option<Side>,
@@ -128,8 +135,9 @@ impl Cell {
 
 #[derive(Debug)]
 pub struct BoardPiece {
-    piece: ChessPiece,
-    location: (i8, i8)
+    pub piece: ChessPiece,
+    pub side: Side,
+    pub location: (i8, i8)
 }
 
 #[derive(Debug)]
@@ -139,11 +147,13 @@ struct BoardEvaluationInfo {
     black_pieces: u8
 }
 
+#[derive(Clone)]
 pub struct Board {
     board: Vec<Vec<Cell>>,
     //TODO Should probably move to BoardView
     pub text_params: TextParams,
-    pub text_spacing: f32
+    pub text_spacing: f32,
+    pub last_move: Move
 }
 
 
@@ -244,17 +254,36 @@ impl Board {
         self.iterate_board(|i, j| {
             let cell = &self.board[i as usize][j as usize];
             if cell.has_piece_and_side_matches(side) {
-                match cell.state {
-                    CellState::Piece(piece) => pieces.push(BoardPiece {piece, location: (i, j)}),
-                    CellState::Empty => ()
+                let mut board_piece = BoardPiece {
+                    location: (0, 0),
+                    side: Side::White,
+                    piece: ChessPiece::Pawn
                 };
+                if let CellState::Piece(piece) = cell.state {
+                    board_piece.piece = piece;
+                    board_piece.location =  (j, i);
+                }
+                if let Some(side) = cell.side {
+                    board_piece.side = side;
+                }
+                pieces.push(board_piece);
             }
         });
         pieces
     }
 
-    pub fn get_all_moves_for_side(&self) -> Vec<(i8, i8)> {
-        unimplemented!();
+    pub fn get_all_moves_for_side(&self, side: Side) -> Vec<Move> {
+        let mut moves_for_boardpiece: Vec<Move> = vec![];
+        let sides_board_piecs = self.get_sides_boardpieces(side);
+        for board_piece in sides_board_piecs {
+            let move_for_piece = ChessPiece::get_pseudolegal_moves(&self.board, board_piece.location, &board_piece.piece, &board_piece.side);
+
+            let move_iter = move_for_piece.into_iter()
+                .map(|to_move| Move {from: board_piece.location, to: to_move});
+
+            moves_for_boardpiece.extend(move_iter);
+        }
+        moves_for_boardpiece
     }
 
     pub fn evaluate_board_score(board: &Vec<Vec<Cell>>, whose_turn: Side) -> i32 {
@@ -293,10 +322,20 @@ impl Board {
         let mut board = Board {
             board,
             text_params,
-            text_spacing: ChessPiece::get_center_offset(&ChessPiece::Pawn, &text_params)
+            text_spacing: ChessPiece::get_center_offset(&ChessPiece::Pawn, &text_params),
+            last_move: Move { from: (0, 0), to: (0, 0) }
         };
         board.add_pieces();
         return board;
+    }
+
+    pub fn get_piece(board: &Vec<Vec<Cell>>, cell: (i8, i8)) -> Option<ChessPiece> {
+        let cell = &board[cell.1 as usize][cell.0 as usize];
+
+        if let CellState::Piece(piece) = cell.state {
+            return Some(piece);
+        }
+        None
     }
 
     pub fn piece_at(&self, point: (i8, i8)) {
@@ -324,6 +363,36 @@ impl Board {
         return bitfield;
     }
 
+    pub fn unmake_move(&mut self, l_move: &Move) -> bool {
+        let unmake_move = Move {
+            from: l_move.to,
+            to: l_move.from
+        };
+
+        self.make_move(&unmake_move)
+    }
+
+    pub fn make_move(&mut self, l_move: &Move) -> bool {
+        let Move {from, to} = l_move;
+        let origin_cell: &Cell = &self.board[from.1 as usize][from.0 as usize];
+
+        let side = match origin_cell.side {
+            Some(side) => side,
+            None => return false
+        };
+        if let CellState::Piece(piece) = origin_cell.state {
+            let origin_cell_mut = &mut self.board[from.1 as usize][from.0 as usize];
+            origin_cell_mut.modify_cell(CellState::Empty, None);
+
+            //TODO Add text_spacing
+            self.board[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
+            self.board[to.1 as usize][to.0 as usize].side = Some(side);
+
+            return true;
+        }
+        false
+    }
+
     //TODO Maybe make this return a Result
     pub fn move_piece(&mut self, origin: (i8, i8), to: (i8, i8), whose_turn: Side) -> bool {
         let origin_cell: &Cell = &self.board[origin.1 as usize][origin.0 as usize];
@@ -343,6 +412,10 @@ impl Board {
                 //TODO Add text_spacing
                 self.board[to.1 as usize][to.0 as usize].state = CellState::Piece(piece);
                 self.board[to.1 as usize][to.0 as usize].side = Some(side);
+                self.last_move = Move {
+                    from: (origin.0, origin.1),
+                    to: (to.0, to.1)
+                };
                 return true;
             }
         }

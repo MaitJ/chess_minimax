@@ -117,6 +117,8 @@ impl ChessPiece {
             Side::Black => (x, y + 1)
         };
 
+        if to_y > 7 || to_y < 0 {return moves;}
+
         let to_cell = &board[to_y as usize][to_x as usize];
         if to_cell.is_occupied() && !to_cell.contains_opponents_piece(whose_turn) {return moves;}
         //if to_cell.is_occupied() {return moves;}

@@ -1,6 +1,7 @@
 mod chess;
 use chess::board::Board;
 use chess::board_view::BoardView;
+use chess::minimax::opponents_turn;
 use chess::piece::Side;
 use macroquad::prelude::*;
 
@@ -35,9 +36,6 @@ async fn main() -> Result<(), FontError> {
     //-1 or 1
     let mut whose_turn: Side = Side::White;
 
-    let pieces = chess_board.get_sides_boardpieces(Side::White);
-    pieces.into_iter().for_each(|piece| println!("white_piece: {:?}", piece));
-
     loop {
         let screen_width = screen_width();
         let screen_height = screen_height();
@@ -63,9 +61,11 @@ async fn main() -> Result<(), FontError> {
         }
 
 
-        //if opponents_turn {
-        //  opponent.turn(board);
-        //}
+        if whose_turn == Side::Black {
+            //Clone board before
+            let simulated_board = chess_board.clone();
+            whose_turn = opponents_turn(&mut chess_board, simulated_board, whose_turn);
+        }
         //swap_turn
         next_frame().await
     }
